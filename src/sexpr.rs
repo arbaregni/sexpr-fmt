@@ -79,6 +79,12 @@ impl Sexpr<'_> {
         let complexity = 0;
         Sexpr{ kind, complexity }
     }
+    pub fn is_named(&self, text: &str) -> bool {
+        match self.kind {
+            Atom(name) if name == text => true,
+            _ => false
+        }
+    }
     pub fn is_blank(&self) -> bool {
         if let Atom(text) = self.kind {
             text.is_empty()
@@ -91,26 +97,38 @@ impl Sexpr<'_> {
         let mut f = ToWriteFmt(io::stdout());
         self.write_helper(&mut f, fmt_args)
     }
-    /// Writes the display to `f`, each line having at least
-    /// `depth` spaces before it
+    /// Writes this sexpr to `f`, using the specified FormatArgs
+    /// prints the head of this sexpr immediately, but each subsequent newline
+    /// has `depth` spaces preceding any text
     fn write_helper<W>(&self, f: &mut W, args: FormatArgs) -> fmt::Result
         where W: fmt::Write
     {
         let tab = args.tab();
         match self.kind {
-            Atom(text) => write!(f, "{}{}", tab, text)?,
+            Atom(text) => write!(f, "{}", text)?,
             Compound(ref head, ref subformulas) => {
-                let (new_depth, sep) =
+                let (new_depth, sep, line_prefix) =
                     if self.complexity <= args.complexity_threshold {
-                        // inlined: do print any tabs and separate with ' '
-                        (0, ' ')
+                        // inlined: do print any tabs on subsequent lines and separate with ' ', followed by no spaces
+                        (0, " ", "")
                     } else {
-                        // multiline: increment the depth, and separate with '\n'
-                        (args.depth + 4, '\n')
+                        // multiline: increment the depth,
+                        //     and separate with a newline and a tab, (this indents them relative to us)
+                        //     followed by the proper number of spaces (this preserves our indentation relative to our caller)
+                        (args.depth + 4, "\n    ", tab.as_str())
                     };
-                write!(f, "{tab}({head}", tab = tab, head = head)?;
-                for sexpr in subformulas {
-                    write!(f, "{}", sep)?;
+                write!(f, "({}", head)?;
+                let mut subformula_iter = subformulas.iter();
+                if args.short_quantifiers && head.is_named("forall") || head.is_named("exists") {
+                    if let Some(sexpr) = subformula_iter.next() {
+                        // if the command line option is set, and our head is an atom `forall` or `exists`,
+                        // then the first subformula is written on the same line
+                        write!(f, " ")?;
+                        sexpr.write_helper(f, args)?;
+                    }
+                }
+                for sexpr in subformula_iter {
+                    write!(f, "{}{}", sep, line_prefix)?;
                     sexpr.write_helper(f, args.with_depth(new_depth))?;
                 }
                 // we put the closing `)` on a new line only if we're in multiline mode
@@ -123,22 +141,35 @@ impl Sexpr<'_> {
         Ok(())
     }
 }
-/// Contains all of the arguments needed in the calculations
-/// of `Sexpr::format`
+/// Contains all of the arguments needed in the calculations of `Sexpr::write_helper`
+#[derive(Copy, Clone, Debug)]
 struct FormatArgs {
     depth: usize, // the current nesting depth of the printing
     complexity_threshold: u32, // the maximum complexity to print a sexpr on a single line
+    short_quantifiers: bool,
 }
 impl FormatArgs {
     /// create the default formatting arguments
     fn new() -> FormatArgs {
-        FormatArgs { depth: 0, complexity_threshold: 1}
+        FormatArgs {
+            depth: 0,
+            complexity_threshold: 1,
+            short_quantifiers: false,
+        }
     }
     fn from(cmd_args: &CmdArgs) -> FormatArgs {
-        FormatArgs { depth: 0, complexity_threshold: cmd_args.complexity_threshold() }
+        FormatArgs {
+            depth: 0,
+            complexity_threshold: cmd_args.complexity_threshold(),
+            short_quantifiers: cmd_args.short_quantifiers(),
+        }
     }
     fn with_depth(&self, new_depth: usize) -> FormatArgs {
-        FormatArgs { depth: new_depth, complexity_threshold: self.complexity_threshold }
+        FormatArgs {
+            depth: new_depth,
+            complexity_threshold: self.complexity_threshold,
+            short_quantifiers: self.short_quantifiers,
+        }
     }
     fn tab(&self) -> String {
         repeat(' ').take(self.depth).collect()

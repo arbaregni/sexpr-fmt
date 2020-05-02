@@ -19,15 +19,20 @@ pub struct CmdArgs {
     #[structopt(short, long)]
     debug: bool,
     // the nesting depth of a s-expression to display on a single line
-    #[structopt(short, long, default_value = "2")]
+    #[structopt(short, long, default_value = "1")]
     complexity_threshold: u32,
+    // squish the arguments of quantifiers onto the same line
+    #[structopt(short = "q", long)]
+    short_quantifiers: bool,
 }
 impl CmdArgs {
     pub fn noisy(&self) -> bool { !self.silent }
     pub fn multiline(&self) -> bool { self.multiline }
     pub fn debug(&self) -> bool { self.debug }
     pub fn complexity_threshold(&self) -> u32 { self.complexity_threshold }
+    pub fn short_quantifiers(&self) -> bool { self.short_quantifiers }
 }
+
 fn read_input(args: &CmdArgs) -> Result<String, io::Error> {
     if args.noisy() {
         println!("Input s-expression to format: ");
@@ -52,7 +57,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let input = read_input(&cmd_args)?;
     let sexpr = Sexpr::parse(&input)?;
     if cmd_args.debug() {
-        println!("{:?}", sexpr);
+        println!("final result: {:#?}", sexpr);
     }
     sexpr.pretty_print(&cmd_args)?;
     Ok(())
