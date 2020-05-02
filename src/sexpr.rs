@@ -1,7 +1,8 @@
-use std::fmt::Formatter;
-use std::{fmt};
+use std::{fmt, io};
 use crate::sexpr::SexprKind::{Compound, Atom};
 use std::iter::repeat;
+use std::fmt::Formatter;
+use crate::CmdArgs;
 
 #[derive(Debug)]
 pub struct Sexpr<'a> {
@@ -85,10 +86,16 @@ impl Sexpr<'_> {
             false
         }
     }
-    /// Helper function for impl of `fmt::Display`
-    /// writes the display to `f`, each line having at least
+    pub fn pretty_print(&self, cmd_args: &CmdArgs) -> fmt::Result {
+        let fmt_args = FormatArgs::from(cmd_args);
+        let mut f = ToWriteFmt(io::stdout());
+        self.write_helper(&mut f, fmt_args)
+    }
+    /// Writes the display to `f`, each line having at least
     /// `depth` spaces before it
-    fn format(&self, f: &mut Formatter<'_>, args: FormatArgs) -> fmt::Result {
+    fn write_helper<W>(&self, f: &mut W, args: FormatArgs) -> fmt::Result
+        where W: fmt::Write
+    {
         let tab = args.tab();
         match self.kind {
             Atom(text) => write!(f, "{}{}", tab, text)?,
@@ -104,7 +111,7 @@ impl Sexpr<'_> {
                 write!(f, "{tab}({head}", tab = tab, head = head)?;
                 for sexpr in subformulas {
                     write!(f, "{}", sep)?;
-                    sexpr.format(f, args.with_depth(new_depth))?;
+                    sexpr.write_helper(f, args.with_depth(new_depth))?;
                 }
                 // we put the closing `)` on a new line only if we're in multiline mode
                 if self.complexity > args.complexity_threshold {
@@ -123,8 +130,12 @@ struct FormatArgs {
     complexity_threshold: u32, // the maximum complexity to print a sexpr on a single line
 }
 impl FormatArgs {
-    fn from(depth: usize, complexity_threshold: u32) -> FormatArgs {
-        FormatArgs { depth, complexity_threshold }
+    /// create the default formatting arguments
+    fn new() -> FormatArgs {
+        FormatArgs { depth: 0, complexity_threshold: 1}
+    }
+    fn from(cmd_args: &CmdArgs) -> FormatArgs {
+        FormatArgs { depth: 0, complexity_threshold: cmd_args.complexity_threshold() }
     }
     fn with_depth(&self, new_depth: usize) -> FormatArgs {
         FormatArgs { depth: new_depth, complexity_threshold: self.complexity_threshold }
@@ -138,10 +149,21 @@ fn is_ident(s: &str) -> bool {
     s.chars().all(|ch| ch != '(' && ch != ')' && !ch.is_whitespace())
 }
 
+// a wrapper struct to enable things that implement io::Write to be passed to write_helper
+struct ToWriteFmt<T>(T);
+
+impl<'a, T> fmt::Write for ToWriteFmt<T> where T: io::Write
+{
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.0.write_all(s.as_bytes()).map_err(|_| fmt::Error)
+    }
+}
 
 impl <'a> fmt::Display for Sexpr<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        self.format(f, FormatArgs::from(0, 1))
+        let fmt_args = FormatArgs::new();
+        self.write_helper(f, fmt_args)?;
+        Ok(())
     }
 }
 
